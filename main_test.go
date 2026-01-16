@@ -487,6 +487,16 @@ func TestRun(t *testing.T) {
 			wantOutput: "192.168.1.0/31\n2001:db8::1/128\n",
 		},
 		{
+			name:       "Mixed plain IPs and CIDR notation",
+			input:      "192.168.1.0\n192.168.1.1/32\n192.168.1.2\n192.168.1.3/32\n",
+			wantOutput: "192.168.1.0/30\n",
+		},
+		{
+			name:       "Plain IP aggregates with /24",
+			input:      "10.0.0.0/24\n10.0.0.5\n",
+			wantOutput: "10.0.0.0/24\n",
+		},
+		{
 			name:       "Empty input",
 			input:      "",
 			wantOutput: "",
