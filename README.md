@@ -8,8 +8,12 @@ A fast CIDR aggregation tool written in Go. Combines overlapping and adjacent IP
 - Removes overlapping/redundant ranges (e.g., `10.0.0.0/8` contains `10.1.0.0/16`)
 - Supports both IPv4 and IPv6
 - Handles various input formats:
-  - Plain IPs (`192.168.1.1`)
   - CIDR notation (`192.168.1.0/24`)
+  - Plain IPs (`192.168.1.1`)
+  - Wildcard (`192.168.1.*` or `10.*.*.*`)
+  - Dash range (`192.168.1.1-192.168.1.255`)
+  - Short range (`192.168.1.0-255`)
+  - Netmask (`192.168.1.0 255.255.255.0`)
   - Spamhaus format (`1.2.3.0/24 ; SBL123456`)
   - Comments (`#` or `;` prefixed lines)
 - Single static binary with no dependencies
@@ -23,7 +27,10 @@ go build -o aggregate-cidr .
 ## Usage
 
 ```bash
-# From file
+# File argument
+aggregate-cidr ip-list.txt > aggregated.txt
+
+# Stdin redirect
 aggregate-cidr < ip-list.txt > aggregated.txt
 
 # From pipe
@@ -32,6 +39,10 @@ cat blocklist.txt | aggregate-cidr
 # Example
 echo -e "192.168.1.0/32\n192.168.1.1/32\n192.168.1.2/32\n192.168.1.3/32" | aggregate-cidr
 # Output: 192.168.1.0/30
+
+# Mixed formats all work together
+echo -e "192.168.0.*\n192.168.1.0/24\n192.168.2.0 255.255.255.0\n192.168.3.0-255" | aggregate-cidr
+# Output: 192.168.0.0/22
 ```
 
 ## Use Cases
