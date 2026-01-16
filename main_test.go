@@ -497,6 +497,11 @@ func TestRun(t *testing.T) {
 			wantOutput: "10.0.0.0/24\n",
 		},
 		{
+			name:       "Non-adjacent plain IPs stay separate",
+			input:      "192.168.0.1\n192.168.1.1\n",
+			wantOutput: "192.168.0.1/32\n192.168.1.1/32\n",
+		},
+		{
 			name:       "Empty input",
 			input:      "",
 			wantOutput: "",
