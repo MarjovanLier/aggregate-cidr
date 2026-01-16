@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"sort"
@@ -118,16 +119,22 @@ func ipToUint32(ip net.IP) uint32 {
 }
 
 func main() {
-	var cidrs []*CIDR
-	scanner := bufio.NewScanner(os.Stdin)
+	if err := run(os.Stdin, os.Stdout, os.Stderr); err != nil {
+		os.Exit(1)
+	}
+}
 
-	// Read all CIDRs from stdin
+func run(input io.Reader, output, errOutput io.Writer) error {
+	var cidrs []*CIDR
+	scanner := bufio.NewScanner(input)
+
+	// Read all CIDRs from input
 	lineNum := 0
 	for scanner.Scan() {
 		lineNum++
 		cidr, err := parseCIDR(scanner.Text())
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "line %d: %v\n", lineNum, err)
+			fmt.Fprintf(errOutput, "line %d: %v\n", lineNum, err)
 			continue
 		}
 		if cidr != nil {
@@ -136,12 +143,12 @@ func main() {
 	}
 
 	if err := scanner.Err(); err != nil {
-		fmt.Fprintf(os.Stderr, "error reading input: %v\n", err)
-		os.Exit(1)
+		fmt.Fprintf(errOutput, "error reading input: %v\n", err)
+		return err
 	}
 
 	if len(cidrs) == 0 {
-		return
+		return nil
 	}
 
 	// Separate IPv4 and IPv6
@@ -160,11 +167,13 @@ func main() {
 
 	// Output results
 	for _, c := range ipv4 {
-		fmt.Println(c)
+		fmt.Fprintln(output, c)
 	}
 	for _, c := range ipv6 {
-		fmt.Println(c)
+		fmt.Fprintln(output, c)
 	}
+
+	return nil
 }
 
 func processNetworks(cidrs []*CIDR) []*CIDR {
