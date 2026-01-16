@@ -567,7 +567,23 @@ func ipToUint32(ip net.IP) uint32 {
 }
 
 func main() {
-	if err := run(os.Stdin, os.Stdout, os.Stderr); err != nil {
+	var input *os.File
+	var err error
+
+	if len(os.Args) > 1 {
+		// File argument provided
+		input, err = os.Open(os.Args[1])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error opening file: %v\n", err)
+			os.Exit(1)
+		}
+		defer input.Close()
+	} else {
+		// Read from stdin
+		input = os.Stdin
+	}
+
+	if err := run(input, os.Stdout, os.Stderr); err != nil {
 		os.Exit(1)
 	}
 }
