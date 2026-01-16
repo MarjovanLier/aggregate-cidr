@@ -1,7 +1,7 @@
 // aggregate-cidr - combine a list of CIDR address blocks
 //
 // Based on aggregate-cidr-addresses by Mark Suter <suter@zwitterion.org>
-// Original Perl version: https://github.com/msuter/aggregate-cidr-addresses
+// Original Perl version: https://zwitterion.org/software/aggregate-cidr-addresses/
 //
 // This Go port aggregates overlapping and adjacent IP address blocks
 // into the smallest possible set of CIDR prefixes.
