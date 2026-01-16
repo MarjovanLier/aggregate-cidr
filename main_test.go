@@ -678,7 +678,7 @@ type errorReader struct {
 	err error
 }
 
-func (r *errorReader) Read(p []byte) (n int, err error) {
+func (r *errorReader) Read(_ []byte) (n int, err error) {
 	return 0, r.err
 }
 
@@ -772,7 +772,7 @@ func TestMainIntegration(t *testing.T) {
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("Failed to build binary: %v", err)
 	}
-	defer exec.Command("rm", "aggregate-cidr-test").Run()
+	defer func() { _ = exec.Command("rm", "aggregate-cidr-test").Run() }()
 
 	tests := []struct {
 		name   string
@@ -844,7 +844,7 @@ func TestMainWithInvalidInput(t *testing.T) {
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("Failed to build binary: %v", err)
 	}
-	defer exec.Command("rm", "aggregate-cidr-test").Run()
+	defer func() { _ = exec.Command("rm", "aggregate-cidr-test").Run() }()
 
 	cmd = exec.Command("./aggregate-cidr-test")
 	cmd.Stdin = strings.NewReader("192.168.1.0/24\nnot-a-valid-ip\n192.168.2.0/24\n")
@@ -853,7 +853,7 @@ func TestMainWithInvalidInput(t *testing.T) {
 	cmd.Stderr = &stderr
 
 	// Should still succeed but output error to stderr
-	cmd.Run()
+	_ = cmd.Run()
 
 	// Check stderr contains error message
 	if !strings.Contains(stderr.String(), "invalid") {
@@ -1052,7 +1052,7 @@ func TestParseRange(t *testing.T) {
 		{name: "/16 aligned", input: "192.168.0.0-192.168.255.255", want: []string{"192.168.0.0/16"}},
 
 		// Full range - non-CIDR aligned (produces multiple CIDRs)
-		{name: "Non-aligned 1-5", input: "192.168.1.1-192.168.1.5", wantCount: 3}, // 1/32 + 2-3/31 + 4-5/31
+		{name: "Non-aligned 1-5", input: "192.168.1.1-192.168.1.5", wantCount: 3},   // 1/32 + 2-3/31 + 4-5/31
 		{name: "Non-aligned 1-10", input: "192.168.1.1-192.168.1.10", wantCount: 5}, // 1/32 + 2-3/31 + 4-7/30 + 8-9/31 + 10/32
 
 		// Short range format
@@ -1442,7 +1442,7 @@ func TestRunWithInvalidNewFormats(t *testing.T) {
 // Benchmark tests
 func BenchmarkParseCIDR(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		parseCIDR("192.168.1.0/24")
+		_, _ = parseCIDR("192.168.1.0/24")
 	}
 }
 

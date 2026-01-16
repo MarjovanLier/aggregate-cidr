@@ -1,11 +1,10 @@
-// aggregate-cidr - combine a list of CIDR address blocks
+// Package main provides aggregate-cidr, a tool to combine a list of CIDR address blocks.
 //
 // Based on aggregate-cidr-addresses by Mark Suter <suter@zwitterion.org>
 // Original Perl version: https://zwitterion.org/software/aggregate-cidr-addresses/
 //
 // This Go port aggregates overlapping and adjacent IP address blocks
 // into the smallest possible set of CIDR prefixes.
-
 package main
 
 import (
@@ -97,8 +96,10 @@ func (c *CIDR) CanAggregate(other *CIDR) bool {
 	return cParent.Equal(otherParent)
 }
 
-// Aggregate combines two CIDRs into their parent
-func (c *CIDR) Aggregate(other *CIDR) *CIDR {
+// Aggregate combines two CIDRs into their parent.
+// The other parameter is required by the API but not used in the calculation
+// since both CIDRs mask to the same parent (verified by CanAggregate).
+func (c *CIDR) Aggregate(_ *CIDR) *CIDR {
 	parentOnes := c.ones - 1
 	parentMask := net.CIDRMask(parentOnes, c.bits)
 	parentIP := c.ip.Mask(parentMask)
@@ -248,7 +249,7 @@ func parseIPv6Wildcard(s string) ([]*CIDR, error) {
 		// For patterns like "2001:db8::*", count segments before ::
 		parts := strings.Split(s, "::")
 		if len(parts) > 2 {
-			return nil, fmt.Errorf("invalid IPv6 wildcard format %q: multiple ::", s)
+			return nil, fmt.Errorf("invalid IPv6 wildcard format %q: contains multiple double-colons", s)
 		}
 
 		segments := 0
@@ -300,15 +301,8 @@ func parseRange(s string) ([]*CIDR, error) {
 	}
 
 	// Full range format
-	var startIP, endIP net.IP
-
-	if isIPv6 {
-		startIP = net.ParseIP(startStr)
-		endIP = net.ParseIP(endStr)
-	} else {
-		startIP = net.ParseIP(startStr)
-		endIP = net.ParseIP(endStr)
-	}
+	startIP := net.ParseIP(startStr)
+	endIP := net.ParseIP(endStr)
 
 	if startIP == nil {
 		return nil, fmt.Errorf("invalid range start IP %q", startStr)
@@ -355,7 +349,7 @@ func parseShortRange(startStr, endOctetStr string) ([]*CIDR, error) {
 	// Build end IP
 	endIP := make(net.IP, 4)
 	copy(endIP, startIP)
-	endIP[3] = byte(endOctet)
+	endIP[3] = byte(endOctet) //nolint:gosec // G602: endIP is always 4 bytes (created above)
 
 	return rangeToCIDRs(startIP, endIP)
 }
@@ -491,7 +485,7 @@ func rangeToCIDRs(startIP, endIP net.IP) ([]*CIDR, error) {
 		cidrs = append(cidrs, cidr)
 
 		// Advance start by block size
-		blockSize := new(big.Int).Lsh(one, uint(maxSize))
+		blockSize := new(big.Int).Lsh(one, uint(maxSize)) //nolint:gosec // G115: maxSize is bounded [0, 128]
 		start.Add(start, blockSize)
 	}
 
@@ -567,6 +561,10 @@ func ipToUint32(ip net.IP) uint32 {
 }
 
 func main() {
+	os.Exit(mainRun())
+}
+
+func mainRun() int {
 	var input *os.File
 	var err error
 
@@ -574,18 +572,19 @@ func main() {
 		// File argument provided
 		input, err = os.Open(os.Args[1])
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "error opening file: %v\n", err)
-			os.Exit(1)
+			_, _ = fmt.Fprintf(os.Stderr, "error opening file: %v\n", err)
+			return 1
 		}
-		defer input.Close()
+		defer func() { _ = input.Close() }()
 	} else {
 		// Read from stdin
 		input = os.Stdin
 	}
 
 	if err := run(input, os.Stdout, os.Stderr); err != nil {
-		os.Exit(1)
+		return 1
 	}
+	return 0
 }
 
 func run(input io.Reader, output, errOutput io.Writer) error {
@@ -598,14 +597,14 @@ func run(input io.Reader, output, errOutput io.Writer) error {
 		lineNum++
 		parsed, err := parseInput(scanner.Text())
 		if err != nil {
-			fmt.Fprintf(errOutput, "line %d: %v\n", lineNum, err)
+			_, _ = fmt.Fprintf(errOutput, "line %d: %v\n", lineNum, err)
 			continue
 		}
 		cidrs = append(cidrs, parsed...)
 	}
 
 	if err := scanner.Err(); err != nil {
-		fmt.Fprintf(errOutput, "error reading input: %v\n", err)
+		_, _ = fmt.Fprintf(errOutput, "error reading input: %v\n", err)
 		return err
 	}
 
@@ -629,10 +628,14 @@ func run(input io.Reader, output, errOutput io.Writer) error {
 
 	// Output results
 	for _, c := range ipv4 {
-		fmt.Fprintln(output, c)
+		if _, err := fmt.Fprintln(output, c); err != nil {
+			return err
+		}
 	}
 	for _, c := range ipv6 {
-		fmt.Fprintln(output, c)
+		if _, err := fmt.Fprintln(output, c); err != nil {
+			return err
+		}
 	}
 
 	return nil
