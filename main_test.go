@@ -51,10 +51,27 @@ func TestParseCIDR(t *testing.T) {
 		{name: "Tab then hash comment", input: "\t# comment", wantNil: true},
 		{name: "Space before semicolon", input: " ;", wantNil: true},
 
-		// Invalid inputs
+		// Invalid inputs (negative flow)
 		{name: "Invalid IP", input: "not.an.ip/24", wantErr: true},
-		{name: "Invalid prefix", input: "192.168.1.0/33", wantErr: true},
-		{name: "Malformed", input: "192.168.1/24", wantErr: true},
+		{name: "Invalid prefix too large", input: "192.168.1.0/33", wantErr: true},
+		{name: "Invalid prefix negative", input: "192.168.1.0/-1", wantErr: true},
+		{name: "IPv6 invalid prefix", input: "2001:db8::/129", wantErr: true},
+		{name: "Malformed missing octet", input: "192.168.1/24", wantErr: true},
+		{name: "Malformed double slash", input: "192.168.1.0//24", wantErr: true},
+		{name: "Malformed just slash", input: "/24", wantErr: true},
+		{name: "Malformed letters in IP", input: "192.168.a.1/24", wantErr: true},
+		{name: "Malformed too many octets", input: "192.168.1.1.1/24", wantErr: true},
+		{name: "Malformed negative octet", input: "192.168.-1.0/24", wantErr: true},
+		{name: "Malformed octet too large", input: "192.168.256.0/24", wantErr: true},
+
+		// Edge cases
+		{name: "Zero IP /32", input: "0.0.0.0/32", want: "0.0.0.0/32"},
+		{name: "Max IPv4 /32", input: "255.255.255.255/32", want: "255.255.255.255/32"},
+		{name: "IPv4 default route", input: "0.0.0.0/0", want: "0.0.0.0/0"},
+		{name: "IPv6 loopback", input: "::1", want: "::1/128"},
+		{name: "IPv6 default route", input: "::/0", want: "::/0"},
+		{name: "IPv6 max address", input: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff/128", want: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff/128"},
+		{name: "IPv4-mapped IPv6 normalised to IPv4", input: "::ffff:192.168.1.1/128", want: "192.168.1.1/32"},
 	}
 
 	for _, tt := range tests {
@@ -500,6 +517,73 @@ func TestRun(t *testing.T) {
 			name:       "Non-adjacent plain IPs stay separate",
 			input:      "192.168.0.1\n192.168.1.1\n",
 			wantOutput: "192.168.0.1/32\n192.168.1.1/32\n",
+		},
+
+		// Edge cases
+		{
+			name:       "Single CIDR passthrough",
+			input:      "192.168.1.0/24\n",
+			wantOutput: "192.168.1.0/24\n",
+		},
+		{
+			name:       "Duplicate entries collapsed",
+			input:      "192.168.1.0/24\n192.168.1.0/24\n192.168.1.0/24\n",
+			wantOutput: "192.168.1.0/24\n",
+		},
+		{
+			name:       "IPv4 default route absorbs all",
+			input:      "0.0.0.0/0\n192.168.1.0/24\n10.0.0.0/8\n172.16.0.0/12\n",
+			wantOutput: "0.0.0.0/0\n",
+		},
+		{
+			name:       "IPv6 default route absorbs all IPv6",
+			input:      "::/0\n2001:db8::/32\nfe80::/10\n",
+			wantOutput: "::/0\n",
+		},
+		{
+			name:       "Boundary IPs aggregate",
+			input:      "0.0.0.0/32\n0.0.0.1/32\n",
+			wantOutput: "0.0.0.0/31\n",
+		},
+		{
+			name:       "Max IPv4 addresses",
+			input:      "255.255.255.254/32\n255.255.255.255/32\n",
+			wantOutput: "255.255.255.254/31\n",
+		},
+		{
+			name:       "Loopback IPv4",
+			input:      "127.0.0.0/8\n127.0.0.1/32\n",
+			wantOutput: "127.0.0.0/8\n",
+		},
+		{
+			name:       "Link-local IPv6",
+			input:      "fe80::1/128\nfe80::2/128\n",
+			wantOutput: "fe80::1/128\nfe80::2/128\n",
+		},
+		{
+			name:       "Private ranges separate",
+			input:      "10.0.0.0/8\n172.16.0.0/12\n192.168.0.0/16\n",
+			wantOutput: "10.0.0.0/8\n172.16.0.0/12\n192.168.0.0/16\n",
+		},
+		{
+			name:       "Large aggregation chain",
+			input:      "10.0.0.0/32\n10.0.0.1/32\n10.0.0.2/32\n10.0.0.3/32\n10.0.0.4/32\n10.0.0.5/32\n10.0.0.6/32\n10.0.0.7/32\n10.0.0.8/32\n10.0.0.9/32\n10.0.0.10/32\n10.0.0.11/32\n10.0.0.12/32\n10.0.0.13/32\n10.0.0.14/32\n10.0.0.15/32\n",
+			wantOutput: "10.0.0.0/28\n",
+		},
+		{
+			name:       "Mixed valid and skipped lines",
+			input:      "# comment\n192.168.1.0/24\n\n; another\n192.168.2.0/24\n   \n",
+			wantOutput: "192.168.1.0/24\n192.168.2.0/24\n",
+		},
+		{
+			name:       "Reverse order input",
+			input:      "192.168.1.128/25\n192.168.1.0/25\n",
+			wantOutput: "192.168.1.0/24\n",
+		},
+		{
+			name:       "IPv4 and IPv6 interleaved",
+			input:      "192.168.1.0/25\n2001:db8::/65\n192.168.1.128/25\n2001:db8::8000:0:0:0/65\n",
+			wantOutput: "192.168.1.0/24\n2001:db8::/64\n",
 		},
 		{
 			name:       "Empty input",
