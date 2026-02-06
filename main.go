@@ -520,7 +520,6 @@ func trailingZeros(n *big.Int, maxBits int) int {
 	}
 
 	count := 0
-	one := big.NewInt(1)
 	temp := new(big.Int).Set(n)
 
 	for count < maxBits {
@@ -531,11 +530,6 @@ func trailingZeros(n *big.Int, maxBits int) int {
 		count++
 	}
 
-	// Clamp to maxBits (for /0 equivalent)
-	_ = one // silence unused warning
-	if count > maxBits {
-		count = maxBits
-	}
 	return count
 }
 

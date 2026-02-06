@@ -2,8 +2,10 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"net"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -937,6 +939,10 @@ func TestParseInput(t *testing.T) {
 		{name: "Netmask invalid IP", input: "not.an.ip 255.255.255.0", wantErr: true},
 		{name: "Netmask invalid mask", input: "192.168.1.0 not.a.mask", wantErr: true},
 		{name: "Netmask non-contiguous", input: "192.168.1.0 255.255.254.1", wantErr: true},
+
+		// parseInput dispatch edge cases
+		{name: "Space with slash", input: "192.168.1.0/24 extra", want: []string{"192.168.1.0/24"}},
+		{name: "IPv6 netmask via parseInput", input: "2001:db8:: ffff:ffff:ffff:ffff::", want: []string{"2001:db8::/64"}},
 	}
 
 	for _, tt := range tests {
@@ -1006,6 +1012,12 @@ func TestParseWildcard(t *testing.T) {
 		{name: "Missing octets", input: "192.168.*", wantErr: true},
 		{name: "No wildcard", input: "192.168.1.0", wantErr: true},
 		{name: "IPv6 wildcard not at end", input: "2001:*:db8::", wantErr: true},
+
+		// IPv6 wildcards without :: notation
+		{name: "IPv6 no double-colon 2 seg", input: "2001:db8:*", want: "2001:db8::/32"},
+		{name: "IPv6 no double-colon 1 seg", input: "2001:*", want: "2001::/16"},
+		{name: "IPv6 no double-colon 4 seg", input: "2001:db8:abcd:ef01:*", want: "2001:db8:abcd:ef01::/64"},
+		{name: "IPv6 empty prefix wildcard", input: "::*", want: "::/0"},
 	}
 
 	for _, tt := range tests {
@@ -1073,6 +1085,7 @@ func TestParseRange(t *testing.T) {
 		{name: "Short invalid octet", input: "192.168.1.0-abc", wantErr: true},
 		{name: "Short octet > 255", input: "192.168.1.0-256", wantErr: true},
 		{name: "Short negative octet", input: "192.168.1.0--1", wantErr: true},
+		{name: "Short invalid start IP", input: "999.999.999.999-255", wantErr: true},
 	}
 
 	for _, tt := range tests {
@@ -1144,6 +1157,12 @@ func TestParseNetmask(t *testing.T) {
 		{name: "Invalid mask", ip: "192.168.1.0", mask: "not.a.mask", wantErr: true},
 		{name: "Non-contiguous mask", ip: "192.168.1.0", mask: "255.255.254.1", wantErr: true},
 		{name: "Non-contiguous mask 2", ip: "192.168.1.0", mask: "255.0.255.0", wantErr: true},
+
+		// IPv6 netmask
+		{name: "IPv6 /64", ip: "2001:db8::", mask: "ffff:ffff:ffff:ffff::", want: "2001:db8::/64"},
+		{name: "IPv6 /32", ip: "2001:db8::", mask: "ffff:ffff::", want: "2001:db8::/32"},
+		{name: "IPv6 /128", ip: "2001:db8::1", mask: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff", want: "2001:db8::1/128"},
+		{name: "IPv6 non-contiguous", ip: "2001:db8::", mask: "ffff::ffff", wantErr: true},
 	}
 
 	for _, tt := range tests {
@@ -1437,6 +1456,162 @@ func TestRunWithInvalidNewFormats(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestParseCIDRToSlice(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    string
+		wantNil bool
+		wantErr bool
+	}{
+		{name: "Valid CIDR", input: "192.168.1.0/24", want: "192.168.1.0/24"},
+		{name: "Invalid CIDR", input: "not-valid/24", wantErr: true},
+		{name: "Empty string", input: "", wantNil: true},
+		{name: "Comment line", input: "# comment", wantNil: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseCIDRToSlice(tt.input)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("parseCIDRToSlice(%q) expected error, got nil", tt.input)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("parseCIDRToSlice(%q) unexpected error: %v", tt.input, err)
+				return
+			}
+
+			if tt.wantNil {
+				if got != nil {
+					t.Errorf("parseCIDRToSlice(%q) expected nil, got %v", tt.input, got)
+				}
+				return
+			}
+
+			if len(got) != 1 {
+				t.Errorf("parseCIDRToSlice(%q) returned %d CIDRs, want 1", tt.input, len(got))
+				return
+			}
+
+			if got[0].String() != tt.want {
+				t.Errorf("parseCIDRToSlice(%q) = %q, want %q", tt.input, got[0].String(), tt.want)
+			}
+		})
+	}
+}
+
+// errorWriter is a writer that fails after a set number of writes
+type errorWriter struct {
+	maxWrites int
+	written   int
+}
+
+func (w *errorWriter) Write(p []byte) (int, error) {
+	if w.written >= w.maxWrites {
+		return 0, fmt.Errorf("write error")
+	}
+	w.written++
+	return len(p), nil
+}
+
+func TestRunWriterError(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		maxWrites int
+	}{
+		{name: "IPv4 writer fails", input: "192.168.1.0/24\n", maxWrites: 0},
+		{name: "IPv6 writer fails", input: "2001:db8::/64\n", maxWrites: 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := strings.NewReader(tt.input)
+			w := &errorWriter{maxWrites: tt.maxWrites}
+			var errOutput bytes.Buffer
+
+			err := run(input, w, &errOutput)
+
+			if err == nil {
+				t.Error("run() expected error for writer failure, got nil")
+			}
+		})
+	}
+}
+
+func TestMainRun(t *testing.T) {
+	// Save original os.Args and os.Stdin
+	origArgs := os.Args
+	origStdin := os.Stdin
+	origStdout := os.Stdout
+	defer func() {
+		os.Args = origArgs
+		os.Stdin = origStdin
+		os.Stdout = origStdout
+	}()
+
+	t.Run("Nonexistent file", func(t *testing.T) {
+		os.Args = []string{"cmd", "/tmp/nonexistent-aggregate-cidr-test-file-12345"}
+		code := mainRun()
+		if code != 1 {
+			t.Errorf("mainRun() with nonexistent file = %d, want 1", code)
+		}
+	})
+
+	t.Run("Valid file", func(t *testing.T) {
+		// Create temp file with CIDR data
+		tmpFile, err := os.CreateTemp("", "aggregate-cidr-test-*.txt")
+		if err != nil {
+			t.Fatalf("Failed to create temp file: %v", err)
+		}
+		defer func() { _ = os.Remove(tmpFile.Name()) }()
+
+		_, _ = tmpFile.WriteString("192.168.1.0/25\n192.168.1.128/25\n")
+		_ = tmpFile.Close()
+
+		os.Args = []string{"cmd", tmpFile.Name()}
+
+		// Redirect stdout to devnull to suppress output
+		devnull, _ := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+		defer func() { _ = devnull.Close() }()
+		os.Stdout = devnull
+
+		code := mainRun()
+		if code != 0 {
+			t.Errorf("mainRun() with valid file = %d, want 0", code)
+		}
+	})
+
+	t.Run("Stdin path", func(t *testing.T) {
+		// Create a pipe to simulate stdin
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatalf("Failed to create pipe: %v", err)
+		}
+
+		_, _ = w.WriteString("192.168.1.0/25\n192.168.1.128/25\n")
+		_ = w.Close()
+
+		os.Args = []string{"cmd"}
+		os.Stdin = r
+
+		// Redirect stdout to devnull
+		devnull, _ := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+		defer func() { _ = devnull.Close() }()
+		os.Stdout = devnull
+
+		code := mainRun()
+		if code != 0 {
+			t.Errorf("mainRun() with stdin = %d, want 0", code)
+		}
+	})
 }
 
 // Benchmark tests
